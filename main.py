@@ -9,40 +9,52 @@ from dotenv import load_dotenv
 V_API = '5.19'
 
 
+class APIError(BaseException):
+    """Error API VK"""
+
+
 def load_comics():
     response = requests.get("https://xkcd.com/info.0.json")
-    response_json = response.json()
-    number_comics = response_json['num']
-    id_comics = random.randint(0,int(number_comics))
+    if not response.ok:
+        raise requests.exceptions.HTTPError()
+    comicses_info = response.json()
+    count_comics = comicses_info['num']
+    id_comics = random.randint(0,int(count_comics))
     response = requests.get("https://xkcd.com/{}/info.0.json".format(id_comics))
-    link_load_comics = response_json['img']
-    name_comics = response_json['safe_title']
-    comment = response_json['alt']
+    if not response.ok:
+        raise requests.exceptions.HTTPError()
+    comics_info = response.json()
+    link_load_comics = comics_info['img']
+    name_comics = comics_info['safe_title']
+    comment = comics_info['alt']
     download_image(link_load_comics, '{}.png'.format(name_comics))
     return comment, name_comics
         
     
 def upload_to_server(name_comics, client_id, access_token):
-    print('client_id',client_id)
     payload = {
         'access_token' : access_token,
         'group_id' : client_id,
         'v' : V_API,
     }
     response = requests.get("https://api.vk.com/method/photos.getWallUploadServer", params = payload)
-    response_json = response.json()
-    print(response.url)
-    print(response.text)
-    upload_url = response_json['response']['upload_url']
+    if not response.ok:
+        raise requests.exceptions.HTTPError()
+    upload_info = response.json()
+    if 'error' in upload_info:
+        raise APIError('Error upload to server')
+    upload_url = upload_info['response']['upload_url']
     with open("{}.png".format(name_comics), 'rb') as image_file_descriptor:
         data = {
             'photo' : image_file_descriptor
            }
         response = requests.post(upload_url, files = data)
-        photo_json = response_json['photo']
-        photo_hash = response_json['hash']
-        server = response_json['server']
-        return photo_json, photo_hash, server
+        if not response.ok:
+            raise requests.exceptions.HTTPError()
+        photo = upload_info['photo']
+        photo_hash = upload_info['hash']
+        server = upload_info['server']
+        return photo, photo_hash, server
     
     
 def save_photo(photo_json, photo_hash, server, client_id, access_token):
@@ -55,9 +67,13 @@ def save_photo(photo_json, photo_hash, server, client_id, access_token):
         'v' : V_API,
     }
     response = requests.post("https://api.vk.com/method/photos.saveWallPhoto", data = data)
-    response_json = response.json()
-    media_id = response_json['response'][0]['id']
-    owner_id = response_json['response'][0]['owner_id']
+    if not response.ok:
+        raise requests.exceptions.HTTPError()
+    save_photo_info = response.json()
+    if 'error' in save_photo_info:
+        raise APIError('Error save photo')
+    media_id = save_photo_info['response'][0]['id']
+    owner_id = save_photo_info['response'][0]['owner_id']
     return media_id, owner_id
     
 
@@ -72,6 +88,11 @@ def posting_comics(media_id, owner_id, group_id, access_token):
     }
 
     response = requests.post("https://api.vk.com/method/wall.post", data = data)
+    if not response.ok:
+        raise requests.exceptions.HTTPError()
+    posting_info = response.json() 
+    if 'error' in posting_info:
+        raise APIError('Error posting comics')
 
 if __name__ == "__main__":
     load_dotenv()
@@ -84,6 +105,8 @@ if __name__ == "__main__":
         media_id, owner_id = save_photo(photo_json, photo_hash, server, client_id, access_token)
         posting_comics(media_id, owner_id, group_id, access_token)
     except requests.exceptions.HTTPError as error:
+        print('Error: ', error)
+    except APIError as error:
         print('Error: ', error)
     finally:
         os.remove("{}.png".format(name_comics))
